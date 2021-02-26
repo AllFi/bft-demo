@@ -2,19 +2,21 @@ package node
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 
 	"github.com/spf13/viper"
 	abci "github.com/tendermint/tendermint/abci/types"
 	cfg "github.com/tendermint/tendermint/config"
+	"github.com/tendermint/tendermint/libs/bytes"
 	tmflags "github.com/tendermint/tendermint/libs/cli/flags"
 	"github.com/tendermint/tendermint/libs/log"
 	tmos "github.com/tendermint/tendermint/libs/os"
+	tmrand "github.com/tendermint/tendermint/libs/rand"
 	nm "github.com/tendermint/tendermint/node"
 	"github.com/tendermint/tendermint/p2p"
 	"github.com/tendermint/tendermint/privval"
@@ -23,26 +25,80 @@ import (
 	tmtime "github.com/tendermint/tendermint/types/time"
 )
 
-func InitNewNode(path string, nodeIndex int) (id string, address string, err error) {
+func InitNewNodes(basePath string, count int) (persistentPeers string, err error) {
 	config := cfg.DefaultConfig()
-	config = config.SetRoot(path + "/.tendermint")
-	cfg.EnsureRoot(path + "/.tendermint")
-	config.LogLevel = "none"
-	config.Consensus.WalPath = path + "/.tendermint/data/cs.wal/wal"
+	genVals := make([]types.GenesisValidator, count)
 
-	initFilesWithConfig(config)
-	if err != nil {
-		panic(err)
+	peers := make([]string, 0)
+	for i := 0; i < count; i++ {
+		nodeDir := basePath + "/node" + strconv.Itoa(i) + "/.tendermint"
+		config = config.SetRoot(nodeDir)
+		cfg.EnsureRoot(nodeDir)
+		config.Consensus.WalPath = nodeDir + "/data/cs.wal/wal"
+
+		if err := initFilesWithConfig(config); err != nil {
+			return "", err
+		}
+
+		pvKeyFile := filepath.Join(nodeDir, config.BaseConfig.PrivValidatorKey)
+		pvStateFile := filepath.Join(nodeDir, config.BaseConfig.PrivValidatorState)
+		pv := privval.LoadFilePV(pvKeyFile, pvStateFile)
+
+		pubKey, err := pv.GetPubKey()
+		if err != nil {
+			return "", fmt.Errorf("can't get pubkey: %w", err)
+		}
+		genVals[i] = types.GenesisValidator{
+			Address: pubKey.Address(),
+			PubKey:  pubKey,
+			Power:   1,
+			Name:    "node" + strconv.Itoa(i),
+		}
+
+		nodeKey, err := p2p.LoadNodeKey(config.NodeKeyFile())
+		if err != nil {
+			return "", err
+		}
+
+		id := string(nodeKey.ID())
+		address := "127.0.0.1:" + strconv.Itoa(ShiftPort(26656, i))
+		peers = append(peers, id+"@"+address)
 	}
 
-	nodeKey, err := p2p.LoadNodeKey(config.NodeKeyFile())
-	if err != nil {
-		return
+	persistentPeers = strings.Join(peers, ",")
+
+	// Generate genesis doc from generated validators
+	genDoc := &types.GenesisDoc{
+		ChainID:         "chain-" + tmrand.Str(6),
+		ConsensusParams: types.DefaultConsensusParams(),
+		GenesisTime:     tmtime.Now(),
+		InitialHeight:   0,
+		Validators:      genVals,
 	}
 
-	id = string(nodeKey.ID())
-	address = "127.0.0.1:" + strconv.Itoa(shiftPort(26656, nodeIndex))
-	return
+	// Write genesis file.
+	for i := 0; i < count; i++ {
+		nodeDir := basePath + "/node" + strconv.Itoa(i) + "/.tendermint"
+		if err := genDoc.SaveAs(filepath.Join(nodeDir, config.BaseConfig.Genesis)); err != nil {
+			_ = os.RemoveAll(basePath)
+			return "", err
+		}
+	}
+
+	// Overwrite default config.
+	for i := 0; i < count; i++ {
+		nodeDir := basePath + "/node" + strconv.Itoa(i) + "/.tendermint"
+		config.SetRoot(nodeDir)
+		config.P2P.AddrBookStrict = false
+		config.P2P.AllowDuplicateIP = true
+		config.P2P.PersistentPeers = persistentPeers
+		config.Moniker = bytes.HexBytes(tmrand.Bytes(8)).String()
+
+		cfg.WriteConfigFile(filepath.Join(nodeDir, "config", "config.toml"), config)
+	}
+
+	fmt.Printf("Successfully initialized %v node directories\n", count)
+	return persistentPeers, nil
 }
 
 func initFilesWithConfig(config *cfg.Config) error {
@@ -68,40 +124,13 @@ func initFilesWithConfig(config *cfg.Config) error {
 		logger.Info("Generated node key", "path", nodeKeyFile)
 	}
 
-	// genesis file
-	genFile := config.GenesisFile()
-	if tmos.FileExists(genFile) {
-		logger.Info("Found genesis file", "path", genFile)
-	} else {
-		genDoc := types.GenesisDoc{
-			ChainID:         fmt.Sprintf("test-chain"),
-			GenesisTime:     tmtime.Now(),
-			ConsensusParams: types.DefaultConsensusParams(),
-		}
-		pubKey, err := pv.GetPubKey()
-		if err != nil {
-			return fmt.Errorf("can't get pubkey: %w", err)
-		}
-		genDoc.Validators = []types.GenesisValidator{{
-			Address: pubKey.Address(),
-			PubKey:  pubKey,
-			Power:   10,
-		}}
-
-		if err := genDoc.SaveAs(genFile); err != nil {
-			return err
-		}
-		logger.Info("Generated genesis file", "path", genFile)
-	}
-
 	return nil
 }
 
-func RunNewNode(app abci.Application, path string, nodeIndex int, persistentPeers string) (err error) {
-	configFile := path + "/.tendermint/config/config.toml"
-	// flag.Lookup("config").Value.Set(configFile)
+func Run(app abci.Application, basePath string, nodeIndex int) (err error) {
+	configFile := basePath + "/node" + strconv.Itoa(nodeIndex) + "/.tendermint/config/config.toml"
 
-	node, err := newTendermint(app, configFile, nodeIndex, persistentPeers)
+	node, err := newTendermint(app, configFile, nodeIndex)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v", err)
 		os.Exit(2)
@@ -121,7 +150,7 @@ func RunNewNode(app abci.Application, path string, nodeIndex int, persistentPeer
 	return
 }
 
-func newTendermint(app abci.Application, configFile string, nodeIndex int, persistentPeers string) (*nm.Node, error) {
+func newTendermint(app abci.Application, configFile string, nodeIndex int) (*nm.Node, error) {
 	// read config
 	config := cfg.DefaultConfig()
 	config.RootDir = filepath.Dir(filepath.Dir(configFile))
@@ -137,10 +166,10 @@ func newTendermint(app abci.Application, configFile string, nodeIndex int, persi
 	}
 
 	// create logger
-	logger := log.NewTMLogger(log.NewSyncWriter(ioutil.Discard))
-	//logger := log.NewTMLogger(log.NewSyncWriter(os.Stdout))
+	//logger := log.NewTMLogger(log.NewSyncWriter(ioutil.Discard))
+	logger := log.NewTMLogger(log.NewSyncWriter(os.Stdout))
 	var err error
-	logger, err = tmflags.ParseLogLevel(config.LogLevel, logger, "none")
+	logger, err = tmflags.ParseLogLevel("error", logger, "error")
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse log level: %w", err)
 	}
@@ -157,11 +186,11 @@ func newTendermint(app abci.Application, configFile string, nodeIndex int, persi
 		return nil, fmt.Errorf("failed to load node's key: %w", err)
 	}
 
-	config.ProxyApp = "tcp://127.0.0.1:" + strconv.Itoa(shiftPort(26658, nodeIndex))              //tcp://127.0.0.1:26658
-	config.Instrumentation.PrometheusListenAddr = ":" + strconv.Itoa(shiftPort(26660, nodeIndex)) //:26660
-	config.P2P.ListenAddress = "tcp://0.0.0.0:" + strconv.Itoa(shiftPort(26656, nodeIndex))       //tcp://0.0.0.0:26656
-	config.RPC.ListenAddress = "tcp://127.0.0.1:" + strconv.Itoa(shiftPort(26657, nodeIndex))     //tcp://127.0.0.1:26657
-	config.P2P.PersistentPeers = persistentPeers
+	config.ProxyApp = "tcp://127.0.0.1:" + strconv.Itoa(ShiftPort(26658, nodeIndex)) //tcp://127.0.0.1:26658
+	config.Instrumentation.Prometheus = true
+	config.Instrumentation.PrometheusListenAddr = ":" + strconv.Itoa(ShiftPort(26660, nodeIndex)) //:26660
+	config.P2P.ListenAddress = "tcp://0.0.0.0:" + strconv.Itoa(ShiftPort(26656, nodeIndex))       //tcp://0.0.0.0:26656
+	config.RPC.ListenAddress = "tcp://127.0.0.1:" + strconv.Itoa(ShiftPort(26657, nodeIndex))     //tcp://127.0.0.1:26657
 	config.Consensus.WalPath = filepath.Dir(filepath.Dir(configFile)) + "/data/cs.wal/wal"
 
 	// create node
@@ -178,10 +207,11 @@ func newTendermint(app abci.Application, configFile string, nodeIndex int, persi
 		return nil, fmt.Errorf("failed to create new Tendermint node: %w", err)
 	}
 
-	fmt.Println("Started: " + strconv.Itoa(nodeIndex))
+	fmt.Println("Started node with index: " + strconv.Itoa(nodeIndex))
+	fmt.Println("RPC listen address: " + config.RPC.ListenAddress)
 	return node, nil
 }
 
-func shiftPort(basePort int, index int) int {
+func ShiftPort(basePort int, index int) int {
 	return basePort + 10*index
 }

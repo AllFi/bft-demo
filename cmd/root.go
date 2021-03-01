@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/mitchellh/go-homedir"
 	"github.com/spf13/cobra"
 )
 
@@ -13,7 +14,7 @@ var (
 )
 
 func init() {
-	rootCmd.PersistentFlags().StringVarP(&baseDir, "baseDir", "", getDefaultDbDir(), "directory to use for databases")
+	rootCmd.PersistentFlags().StringVarP(&baseDir, "baseDir", "", getDefaultBaseDir(), "directory to use for databases")
 }
 
 var rootCmd = &cobra.Command{
@@ -31,11 +32,11 @@ func Execute() {
 	}
 }
 
-func getDefaultDbDir() string {
-	projectDir, err := filepath.Abs(filepath.Dir(os.Args[0]))
+func getDefaultBaseDir() string {
+	home, err := homedir.Dir()
 	if err != nil {
 		panic(err)
 	}
 
-	return filepath.Join(filepath.Dir(projectDir), ".bft-demo")
+	return filepath.Join(home, ".bft-demo")
 }

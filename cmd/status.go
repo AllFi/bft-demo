@@ -13,7 +13,7 @@ func init() {
 }
 
 var statusCmd = &cobra.Command{
-	Use:   "changeStatus [nodeIndex] [status <- Correct,Malicious,Inaccessible]",
+	Use:   "changeStatus [nodeIndex] [status <- Correct,Malicious]",
 	Short: "Changes node status by index",
 	Long:  "Changes node status by index",
 	Args:  cobra.MinimumNArgs(2),

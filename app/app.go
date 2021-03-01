@@ -9,6 +9,10 @@ import (
 	"github.com/tendermint/tendermint/abci/types"
 )
 
+const (
+	CodeTxIsNotValid = 5
+)
+
 type Application struct {
 	types.BaseApplication
 
@@ -24,81 +28,33 @@ func NewApplication() *Application {
 func (app *Application) CheckTx(req types.RequestCheckTx) types.ResponseCheckTx {
 	defer app.log("CheckTx", string(req.Tx))
 
-	switch app.Status {
-	case Correct:
-		value, err := strconv.Atoi(string(req.Tx))
-		if err != nil {
-			return types.ResponseCheckTx{
-				Code: code.CodeTypeEncodingError,
-				Log:  fmt.Sprintf("Invalid tx format, got %s", string(req.Tx))}
-		}
-
-		if value%2 != 0 {
-			return types.ResponseCheckTx{
-				Code: code.CodeTypeUnknownError,
-				Log:  fmt.Sprintf("Invalid transaction: value %% 2 != 0, got %s", string(req.Tx))}
-		}
-		return types.ResponseCheckTx{Code: code.CodeTypeOK}
-	case Malicious:
-		value, err := strconv.Atoi(string(req.Tx))
-		if err != nil {
-			return types.ResponseCheckTx{
-				Code: code.CodeTypeEncodingError,
-				Log:  fmt.Sprintf("Invalid tx format, got %s", string(req.Tx))}
-		}
-
-		if value%2 == 0 {
-			return types.ResponseCheckTx{
-				Code: code.CodeTypeUnknownError,
-				Log:  fmt.Sprintf("Invalid transaction: value %% 2 == 0, got %s", string(req.Tx))}
-		}
-		return types.ResponseCheckTx{Code: code.CodeTypeOK}
-	case Inaccessible:
-		return types.ResponseCheckTx{}
-	default:
-		panic("unknown app status")
+	value, err := strconv.Atoi(string(req.Tx))
+	if err != nil {
+		return types.ResponseCheckTx{
+			Code: code.CodeTypeEncodingError,
+			Log:  fmt.Sprintf("Invalid tx format, tx: %s", string(req.Tx))}
 	}
+
+	if (value%2 != 0) == (app.Status == Correct) {
+		return types.ResponseCheckTx{
+			Code: CodeTxIsNotValid,
+			Log:  fmt.Sprintf("Tx is not valid, tx: %s", string(req.Tx))}
+	}
+	return types.ResponseCheckTx{Code: code.CodeTypeOK}
 }
 
 func (app *Application) DeliverTx(req types.RequestDeliverTx) types.ResponseDeliverTx {
 	defer app.log("DeliverTx", string(req.Tx))
 
-	switch app.Status {
-	case Correct:
-		value, err := strconv.Atoi(string(req.Tx))
-		if err != nil {
-			return types.ResponseDeliverTx{
-				Code: code.CodeTypeEncodingError,
-				Log:  fmt.Sprintf("Invalid tx format, got %s", string(req.Tx))}
-		}
-
-		if value%2 != 0 {
-			return types.ResponseDeliverTx{
-				Code: code.CodeTypeUnknownError,
-				Log:  fmt.Sprintf("Invalid transaction: value %% 2 != 0, got %s", string(req.Tx))}
-		}
+	checkResp := app.CheckTx(types.RequestCheckTx{Tx: req.Tx})
+	if checkResp.Code == code.CodeTypeOK {
+		value, _ := strconv.Atoi(string(req.Tx))
 		app.NewState = &value
-		return types.ResponseDeliverTx{Code: code.CodeTypeOK}
-	case Malicious:
-		value, err := strconv.Atoi(string(req.Tx))
-		if err != nil {
-			return types.ResponseDeliverTx{
-				Code: code.CodeTypeEncodingError,
-				Log:  fmt.Sprintf("Invalid tx format, got %s", string(req.Tx))}
-		}
-
-		if value%2 == 0 {
-			return types.ResponseDeliverTx{
-				Code: code.CodeTypeUnknownError,
-				Log:  fmt.Sprintf("Invalid transaction: value %% 2 != 0, got %s", string(req.Tx))}
-		}
-		app.NewState = &value
-		return types.ResponseDeliverTx{Code: code.CodeTypeOK}
-	case Inaccessible:
-		return types.ResponseDeliverTx{}
-	default:
-		panic("unknown app status")
+	} else if checkResp.Code == CodeTxIsNotValid {
+		app.NewState = &app.State
 	}
+
+	return types.ResponseDeliverTx{Code: checkResp.Code, Log: checkResp.Log}
 }
 
 func (app *Application) Commit() (resp types.ResponseCommit) {

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/otiai10/copy"
 	"github.com/spf13/viper"
 	abci "github.com/tendermint/tendermint/abci/types"
 	cfg "github.com/tendermint/tendermint/config"
@@ -31,7 +32,7 @@ func InitNewNodes(basePath string, count int) (persistentPeers string, err error
 
 	peers := make([]string, 0)
 	for i := 0; i < count; i++ {
-		nodeDir := basePath + "/node" + strconv.Itoa(i) + "/.tendermint"
+		nodeDir := nodePath(basePath, i)
 		config = config.SetRoot(nodeDir)
 		cfg.EnsureRoot(nodeDir)
 		config.Consensus.WalPath = nodeDir + "/data/cs.wal/wal"
@@ -78,7 +79,7 @@ func InitNewNodes(basePath string, count int) (persistentPeers string, err error
 
 	// Write genesis file.
 	for i := 0; i < count; i++ {
-		nodeDir := basePath + "/node" + strconv.Itoa(i) + "/.tendermint"
+		nodeDir := nodePath(basePath, i)
 		if err := genDoc.SaveAs(filepath.Join(nodeDir, config.BaseConfig.Genesis)); err != nil {
 			_ = os.RemoveAll(basePath)
 			return "", err
@@ -87,7 +88,7 @@ func InitNewNodes(basePath string, count int) (persistentPeers string, err error
 
 	// Overwrite default config.
 	for i := 0; i < count; i++ {
-		nodeDir := basePath + "/node" + strconv.Itoa(i) + "/.tendermint"
+		nodeDir := nodePath(basePath, i)
 		config.SetRoot(nodeDir)
 		config.P2P.AddrBookStrict = false
 		config.P2P.AllowDuplicateIP = true
@@ -128,7 +129,7 @@ func initFilesWithConfig(config *cfg.Config) error {
 }
 
 func Run(app abci.Application, basePath string, nodeIndex int) (err error) {
-	configFile := basePath + "/node" + strconv.Itoa(nodeIndex) + "/.tendermint/config/config.toml"
+	configFile := nodePath(basePath, nodeIndex) + "/config/config.toml"
 
 	node, err := newTendermint(app, configFile, nodeIndex)
 	if err != nil {
@@ -210,6 +211,25 @@ func newTendermint(app abci.Application, configFile string, nodeIndex int) (*nm.
 	fmt.Println("Started node with index: " + strconv.Itoa(nodeIndex))
 	fmt.Println("RPC listen address: " + config.RPC.ListenAddress)
 	return node, nil
+}
+
+func nodePath(basePath string, index int) string {
+	return basePath + "/node" + strconv.Itoa(index) + "/.tendermint"
+}
+
+func Recover(basePath string, nodeToRecover int, referenceNode int) (err error) {
+	nodeToRecoverPath := nodePath(basePath, nodeToRecover) + "/data"
+	referenceNodePath := nodePath(basePath, referenceNode) + "/data"
+
+	opt := copy.Options{
+		OnDirExists: func(src, dest string) copy.DirExistsAction {
+			return copy.Replace
+		},
+		Skip: func(src string) (bool, error) {
+			return strings.HasSuffix(src, "LOCK") || strings.HasSuffix(src, "priv_validator_state.json"), nil
+		},
+	}
+	return copy.Copy(referenceNodePath, nodeToRecoverPath, opt)
 }
 
 func ShiftPort(basePort int, index int) int {

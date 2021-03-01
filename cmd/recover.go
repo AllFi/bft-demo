@@ -14,8 +14,8 @@ func init() {
 
 var recoverCmd = &cobra.Command{
 	Use:   "recover [nodeIndex] [referenceNodeIndex]",
-	Short: "Recover",
-	Long:  "Recover node by index (copies data of referenceNode)",
+	Short: "Recovers node by index",
+	Long:  "Recovers node by index (copies data of referenceNode)",
 	Args:  cobra.MinimumNArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
 		nodeIndex, err := strconv.Atoi(args[0])

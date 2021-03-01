@@ -14,12 +14,12 @@ func init() {
 }
 
 var initCmd = &cobra.Command{
-	Use:   "init [nNodes]",
-	Short: "Init",
-	Long:  "Initialize node directories",
+	Use:   "init [numberOfNodes]",
+	Short: "Initializes validator node directories",
+	Long:  "Initializes validator node directories",
 	Args:  cobra.MinimumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		nNodes, err := strconv.Atoi(args[0])
+		numberOfNodes, err := strconv.Atoi(args[0])
 		if err != nil {
 			fmt.Println(err)
 			return
@@ -31,7 +31,7 @@ var initCmd = &cobra.Command{
 			return
 		}
 
-		_, err = node.InitNewNodes(baseDir, nNodes)
+		_, err = node.InitNewNodes(baseDir, numberOfNodes)
 		if err != nil {
 			fmt.Println(err)
 			return

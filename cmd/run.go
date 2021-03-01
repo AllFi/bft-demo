@@ -15,8 +15,8 @@ func init() {
 
 var runCmd = &cobra.Command{
 	Use:   "run [nodeIndex]",
-	Short: "Run",
-	Long:  "Run node by index",
+	Short: "Runs",
+	Long:  "Runs node by index",
 	Args:  cobra.MinimumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		nodeIndex, err := strconv.Atoi(args[0])

@@ -94,6 +94,11 @@ func InitNewNodes(basePath string, count int) (persistentPeers string, err error
 		config.P2P.AllowDuplicateIP = true
 		config.P2P.PersistentPeers = persistentPeers
 		config.Moniker = bytes.HexBytes(tmrand.Bytes(8)).String()
+		config.ProxyApp = "tcp://127.0.0.1:" + strconv.Itoa(ShiftPort(26658, i)) //tcp://127.0.0.1:26658
+		config.Instrumentation.Prometheus = true
+		config.Instrumentation.PrometheusListenAddr = ":" + strconv.Itoa(ShiftPort(26660, i)) //:26660
+		config.P2P.ListenAddress = "tcp://0.0.0.0:" + strconv.Itoa(ShiftPort(26656, i))       //tcp://0.0.0.0:26656
+		config.RPC.ListenAddress = "tcp://127.0.0.1:" + strconv.Itoa(ShiftPort(26657, i))     //tcp://127.0.0.1:26657
 
 		cfg.WriteConfigFile(filepath.Join(nodeDir, "config", "config.toml"), config)
 	}
@@ -167,10 +172,7 @@ func newTendermint(app abci.Application, configFile string, nodeIndex int) (*nm.
 	}
 
 	// create logger
-	//logger := log.NewTMLogger(log.NewSyncWriter(ioutil.Discard))
-	logger := log.NewTMLogger(log.NewSyncWriter(os.Stdout))
-	var err error
-	logger, err = tmflags.ParseLogLevel("error", logger, "error")
+	logger, err := tmflags.ParseLogLevel("error", log.NewTMLogger(log.NewSyncWriter(os.Stdout)), "error")
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse log level: %w", err)
 	}
@@ -186,13 +188,6 @@ func newTendermint(app abci.Application, configFile string, nodeIndex int) (*nm.
 	if err != nil {
 		return nil, fmt.Errorf("failed to load node's key: %w", err)
 	}
-
-	config.ProxyApp = "tcp://127.0.0.1:" + strconv.Itoa(ShiftPort(26658, nodeIndex)) //tcp://127.0.0.1:26658
-	config.Instrumentation.Prometheus = true
-	config.Instrumentation.PrometheusListenAddr = ":" + strconv.Itoa(ShiftPort(26660, nodeIndex)) //:26660
-	config.P2P.ListenAddress = "tcp://0.0.0.0:" + strconv.Itoa(ShiftPort(26656, nodeIndex))       //tcp://0.0.0.0:26656
-	config.RPC.ListenAddress = "tcp://127.0.0.1:" + strconv.Itoa(ShiftPort(26657, nodeIndex))     //tcp://127.0.0.1:26657
-	config.Consensus.WalPath = filepath.Dir(filepath.Dir(configFile)) + "/data/cs.wal/wal"
 
 	// create node
 	node, err := nm.NewNode(

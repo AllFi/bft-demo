@@ -14,7 +14,7 @@ var (
 )
 
 func init() {
-	rootCmd.PersistentFlags().StringVarP(&baseDir, "baseDir", "", getDefaultBaseDir(), "directory to use for databases")
+	rootCmd.PersistentFlags().StringVarP(&baseDir, "baseDir", "", getDefaultBaseDir(), "directory used to store node directories")
 }
 
 var rootCmd = &cobra.Command{
